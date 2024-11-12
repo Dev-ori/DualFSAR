@@ -31,14 +31,14 @@ CVPR/ECCV/AAAI/NIPS/IEEE(Journal) + Arxiv 2023~2024로 정리한 논문들입니
   - [Original Paper Link](https://openaccess.thecvf.com/content/WACV2024/html/Tang_Semantic-Aware_Video_Representation_for_Few-Shot_Action_Recognition_WACV_2024_paper.html)
   - VideoMAE + CLIP
     
-- [ ] paperReview#17 CLIP-guided Prototype Modulating for Few-shot Action Recognition
+- [ ] paperReview#17 CLIP-guided Prototype Modulating for Few-shot Action Recognition (IJCV 2024)
   - [Original Paper Link](https://prod-files-secure.s3.us-west-2.amazonaws.com/0015e87d-0107-4789-905f-5cfd5c668888/dc52f48f-47c2-47f9-8ab9-3487117e62ad/s11263-023-01917-4.pdf)
 
-- [ ] paperReview#23 [NIPS2022] FiLM-Ensemble: Probabilistic Deep Learning via Feature-wise Linear Modulation 
+- [ ] paperReview#23  FiLM-Ensemble: Probabilistic Deep Learning via Feature-wise Linear Modulation (NIPS2022)
   - [Original Paper Link](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8bd31288ad8e9a31d519fdeede7ee47d-Abstract-Conference.html)
   
-  - [ ] paperReview#24 [NIPS2019] Temporal FiLM: Capturing Long-Range Sequence Dependencies with Feature-Wise Modulations.
-  - [Original Paper Link](https://proceedings.neurips.cc/paper/2019/hash/2afc4dfb14e55c6face649a1d0c1025b-Abstract.html)
+- [ ] paperReview#24Temporal FiLM: Capturing Long-Range Sequence Dependencies with Feature-Wise Modulations. (NIPS2019)
+- [Original Paper Link](https://proceedings.neurips.cc/paper/2019/hash/2afc4dfb14e55c6face649a1d0c1025b-Abstract.html)
 ---
 ## 선택 (개별 할당)
 - [ ] paperReview#1 Unsupervised Few-Shot Action Recognition via Action-Appearance Aligned Meta-Adaptation (ICCV 2021)
