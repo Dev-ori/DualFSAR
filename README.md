@@ -9,9 +9,9 @@ Group 5 : Yongjin Jo, Deok-Hyun Ahn
 
 Google Scholar 에서, Meta learning + Action recognition으로 검색하여 나온 결과에서
 CVPR/ECCV/AAAI/NIPS/IEEE(Journal) + Arxiv 2023~2024로 정리한 논문들입니다.
-
+---
 ### paper list
-
+---
 현재까지 리뷰한 논문/자료의 목록은 아래와 같습니다.
 
 ##공통 (리뷰 페이퍼)
@@ -39,7 +39,7 @@ CVPR/ECCV/AAAI/NIPS/IEEE(Journal) + Arxiv 2023~2024로 정리한 논문들입니
   
   - [ ] paperReview#24 [NIPS2019] Temporal FiLM: Capturing Long-Range Sequence Dependencies with Feature-Wise Modulations.
   - [Original Paper Link](https://proceedings.neurips.cc/paper/2019/hash/2afc4dfb14e55c6face649a1d0c1025b-Abstract.html)
-
+---
 ## 선택 (개별 할당)
 - [ ] paperReview#1 Unsupervised Few-Shot Action Recognition via Action-Appearance Aligned Meta-Adaptation (ICCV 2021)
   - [Original Paper Link](https://openaccess.thecvf.com/content/ICCV2021/html/Patravali_Unsupervised_Few-Shot_Action_Recognition_via_Action-Appearance_Aligned_Meta-Adaptation_ICCV_2021_paper.html)
@@ -101,15 +101,6 @@ CVPR/ECCV/AAAI/NIPS/IEEE(Journal) + Arxiv 2023~2024로 정리한 논문들입니
 - [ ] paperReview#22 Meta-Transformer: A Unified Framework for Multimodal Learning
   - [Original Paper Link](https://arxiv.org/abs/2307.10802)
 ---
-
-## 추가 페이퍼
-- [ ] paperReview#23 [NIPS2022] FiLM-Ensemble: Probabilistic Deep Learning via Feature-wise Linear Modulation 
-  - [Original Paper Link](https://proceedings.neurips.cc/paper_files/paper/2022/hash/8bd31288ad8e9a31d519fdeede7ee47d-Abstract-Conference.html)
-  
-  - [ ] paperReview#24 [NIPS2019] Temporal FiLM: Capturing Long-Range Sequence Dependencies with Feature-Wise Modulations.
-  - [Original Paper Link](https://proceedings.neurips.cc/paper/2019/hash/2afc4dfb14e55c6face649a1d0c1025b-Abstract.html)
-
-
 ### Commit Rules
 
 커밋 규칙은 아래와 같습니다.
