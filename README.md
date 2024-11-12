@@ -1,6 +1,8 @@
 # DualFSAR
 AAA740-2024F Final Project
 
+Group 5 : Yongjin Jo, Deok-Hyun Ahn
+
 [Model Architecture](https://excalidraw.com/#json=PhO3qeVFdbYUskLQbfvOZ,dlZytHiHxh44x5rZ9MaiQw)
 
 # paperReview
