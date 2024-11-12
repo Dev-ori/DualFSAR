@@ -1,0 +1,42 @@
+ddp : 
+  activate :  True
+  master_addr :   'localhost' # Master 컴퓨터 주소
+  master_port :   '12355'     # 통신 포트
+  backend     :   'nccl'      # { windows : gloo, linux : nccl }
+  world_size  :   4           # 전체 GPU 개수
+  num_gpus    :   4           # 현재 노드 GPU 개수
+  global_rank :   0           # GLOBAL RANK 시작 번호
+
+wandb :                   # WANDB 사용 여부
+  activate  : False
+  project   : None
+  name      : "sample_name"
+
+random_seed : 42
+
+train : 
+  epochs :        5
+  batch_size :    16
+
+valid :
+
+model : 
+  name :         'toy_model'
+  pretrained :    True
+  checkpoint :    None
+
+optimizer : 
+  optimizer :     'Adam'
+  lr :            1e-3
+  beta:           [0.9, 0.99]
+  weight_decay:   0.05
+
+loss :
+  loss_function : 'L1Loss'
+  reduction :     'mean'
+
+dataset : 
+  from : 'from_directory' # ['from_directory', 'from_csv']
+  path :  ''
+  csv_file :  ''
+  num_workers : 0
