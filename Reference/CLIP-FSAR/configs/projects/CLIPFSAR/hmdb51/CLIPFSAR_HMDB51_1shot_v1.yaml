@@ -10,14 +10,14 @@ TRAIN:
   NUM_SAMPLES: 1000000
   WAY: 5
   SHOT: 1
-  QUERY_PER_CLASS: 5 
+  QUERY_PER_CLASS: 3 
   QUERY_PER_CLASS_TEST: 1
   NUM_TRAIN_TASKS: 5000
   NUM_TEST_TASKS: 10000
   VAL_FRE_ITER: 300
-  BATCH_SIZE: 4  # Same with NUM_GPUS
+  BATCH_SIZE: 2  # Same with NUM_GPUS
   CLASS_NAME: ['brush hair', 'catch', 'chew', 'clap', 'climb', 'climb stairs', 'dive', 'draw_sword', 'dribble', 'drink', 'fall floor', 'flic flac', 'handstand', 'hug', 'jump', 'kiss', 'pullup', 'punch', 'push', 'ride_bike', 'ride horse', 'shake_hands', 'shoot_bow', 'situp', 'stand', 'sword', 'sword exercise', 'throw', 'turn', 'walk', 'wave']
-  BATCH_SIZE_PER_TASK: 4
+  BATCH_SIZE_PER_TASK: 3
   CHECKPOINT_FILE_PATH: ""
   EVAL_PERIOD: 2
   NUM_FOLDS: 1
@@ -29,7 +29,7 @@ AUGMENTATION:
 TEST:
   ENABLE: false
   DATASET: Ssv2_few_shot
-  BATCH_SIZE: 4  # Same with NUM_GPUS
+  BATCH_SIZE: 2  # Same with NUM_GPUS
   TEST_SET: val
   CLASS_NAME: ['fencing', 'kick', 'kick ball', 'pick', 'pour', 'pushup', 'run', 'sit', 'smoke', 'talk']
   NUM_ENSEMBLE_VIEWS: 1
@@ -38,7 +38,7 @@ TEST:
   UPLOAD_CLASSIFIER_RESULTS: true
 
 DATA:
-  DATA_ROOT_DIR: /mnt/workspace/hmdb51/  
+  DATA_ROOT_DIR: /home/dhan/다운로드/FSAR_datasets/HMDB51/hmdb51/
   ANNO_DIR: ./configs/projects/CLIPFSAR/hmdb51/
   NUM_INPUT_FRAMES: 8
   SAMPLING_RATE: 50
@@ -81,7 +81,7 @@ VIDEO:
   BACKBONE:
     META_ARCH: Identity
 
-NUM_GPUS: 4
+NUM_GPUS: 2
 OUTPUT_DIR: output/CLIPFSAR_HMDB51_1shot
 
 
