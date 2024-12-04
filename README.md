@@ -5,7 +5,7 @@ Group 5 : Yongjin Jo, Deok-Hyun Ahn
 
 [Model Architecture](https://excalidraw.com/#json=PhO3qeVFdbYUskLQbfvOZ,dlZytHiHxh44x5rZ9MaiQw)
 
-[![drawio](https://en.wikipedia.org/wiki/Diagrams.net#/media/File:Diagrams.net_Logo.svg)](https://drive.google.com/file/d/1hKavgTwDG6Xl5cS8Y8fbL79JM5ip-mii/view?usp=sharing)
+[drawio](https://drive.google.com/file/d/1hKavgTwDG6Xl5cS8Y8fbL79JM5ip-mii/view?usp=sharing)
 
 
 # paperReview
