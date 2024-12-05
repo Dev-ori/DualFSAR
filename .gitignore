@@ -5,4 +5,5 @@
 *.gif
 *.bmp
 *.tiff
-*.webp
+*.webpfeatures/*
+features/*
