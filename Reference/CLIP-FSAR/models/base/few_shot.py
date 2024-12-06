@@ -3002,12 +3002,12 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
     
 
 @HEAD_REGISTRY.register()
-class CNN_OTAM_CLIPFSAR(CNN_FSHead):
+class DualFSAR(CNN_FSHead):
     """
     OTAM with a CNN backbone.
     """
     def __init__(self, cfg):
-        super(CNN_OTAM_CLIPFSAR, self).__init__(cfg)
+        super(DualFSAR, self).__init__(cfg)
         args = cfg
         self.args = cfg
         import sys
