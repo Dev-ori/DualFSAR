@@ -2685,7 +2685,17 @@ def OTAM_cum_dist_v2(dists, lbda=0.5):
         cum_dists[:,:,l,-1] = dists[:,:,l,-1] - lbda * torch.log( torch.exp(- cum_dists[:,:,l-1,-2] / lbda) + torch.exp(- cum_dists[:,:,l-1,-1] / lbda) + torch.exp(- cum_dists[:,:,l,-2] / lbda) )
     
     return cum_dists[:,:,-1,-1]
-
+# FiLM 모듈 정의
+class FiLM(nn.Module):
+    def __init__(self, feature_dim):
+        super().__init__()
+        self.gamma = nn.Linear(feature_dim, feature_dim)
+        self.beta = nn.Linear(feature_dim, feature_dim)
+    
+    def forward(self, visual_feat, text_feat):
+        gamma = self.gamma(text_feat).unsqueeze(1)
+        beta = self.beta(text_feat).unsqueeze(1)
+        return (1 + gamma) * visual_feat + beta
 
 @HEAD_REGISTRY.register()
 class CNN_OTAM_CLIPFSAR(CNN_FSHead):
@@ -2696,6 +2706,7 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
         super(CNN_OTAM_CLIPFSAR, self).__init__(cfg)
         args = cfg
         self.args = cfg
+
         if cfg.VIDEO.HEAD.BACKBONE_NAME=="RN50":
             backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
             self.backbone = backbone.visual    # model.load_state_dict(state_dict)
@@ -2732,7 +2743,8 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
         self.classification_layer = nn.Sequential() 
         self.scale = nn.Parameter(torch.FloatTensor(1), requires_grad=True)
         self.scale.data.fill_(1.0)
-        
+        # FiLM 모듈 초기화 추가
+        self.film = FiLM(self.mid_dim)
         if hasattr(self.args.TRAIN, "TRANSFORMER_DEPTH") and self.args.TRAIN.TRANSFORMER_DEPTH:
             self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2, depth=int(self.args.TRAIN.TRANSFORMER_DEPTH))
         else:
@@ -2801,7 +2813,9 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
                 support_features = torch.stack(support_features)
                 context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 context_support = torch.stack(context_support)
-            support_features = torch.cat([support_features, context_support], dim=1)
+            # support_features = torch.cat([support_features, context_support], dim=1)
+            # concatenation 대신 FiLM 사용
+            support_features = self.film(support_features, context_support.squeeze(1))
             support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
             if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                 pass

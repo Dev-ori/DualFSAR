@@ -6,3 +6,12 @@
 *.bmp
 *.tiff
 *.webp
+
+*__pycache__/
+Reference/CLIP-FSAR/utils/__pycache__
+*output/
+
+*.tmp
+.idea/
+*.pyc
+/home/dhan/CursorProjects/DualFSAR/.idea
