@@ -106,16 +106,18 @@ for video_path in tqdm.tqdm(video_list):
     # image = vis_processors["eval"](frames).unsqueeze(0).to(device)
     sample = {"image": image, "text_input": [f"a photo of {dir_name.replace('_', ' ')}"] * image.shape[0]}
     with torch.no_grad():
-        image_features = model.extract_features(sample, mode='image')
-        multimodal_features = model.extract_features(sample, mode='multimodal')
-    image_embeds = image_features['image_embeds']
-    image_embeds = image_embeds.detach().cpu().numpy()
+        q_former_image_features, image_embeds_frozen = model.extract_features(sample, mode='image')
+        multimodal_features, _ = model.extract_features(sample, mode='multimodal')
+    q_former_image_embeds = q_former_image_features['image_embeds']
+    q_former_image_embeds = q_former_image_embeds.detach().cpu().numpy()
     multimodal_embeds = multimodal_features['multimodal_embeds']
     multimodal_embeds = multimodal_embeds.detach().cpu().numpy()
+    image_embeds_frozen = image_embeds_frozen.detach().cpu().numpy()
     # save
     with open(os.path.join(args.save_path, dir_name, file_name+'.pickle'), 'wb') as f:
-        pickle.dump({"image_embeds" : image_embeds, 
-                     "multimodal_embeds" : multimodal_embeds, 
+        pickle.dump({"q_former_image_embeds" : q_former_image_embeds, 
+                     "multimodal_embeds" : multimodal_embeds,
+                     "image_embeds" : image_embeds_frozen,
                      'label' : dir_name, 
                      'input_text' : f"a photo of {dir_name.replace('_', ' ')}",
                      "video_length" : video_length,
