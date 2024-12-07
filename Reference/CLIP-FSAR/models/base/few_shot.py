@@ -2790,14 +2790,14 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
             support_bs = support_features.shape[0]
             target_bs = target_features.shape[0]
             
-            # mean of frames CLIP [start]
+            
             if hasattr(self.args.TRAIN, "USE_CLASSIFICATION") and self.args.TRAIN.USE_CLASSIFICATION:
                 feature_classification_in = torch.cat([support_features,target_features], dim=0)
                 feature_classification = self.classification_layer(feature_classification_in).mean(1)
                 class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
             else:
                 class_text_logits = None
-            # mean of frames CLIP [end]
+            
             
             if self.training:
                 context_support = self.text_features_train[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
@@ -2807,33 +2807,25 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
             
             target_features = self.context2(target_features, target_features, target_features)
             context_support = self.mid_layer(context_support) 
-
-            # construct prototype [start]
             if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                 unique_labels = torch.unique(support_labels)
-
-                # class-wise mean of support features
                 support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 support_features = torch.stack(support_features)
-
-                # class-wise mean of text features
                 context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 context_support = torch.stack(context_support)
-                
             # support_features = torch.cat([support_features, context_support], dim=1)
             # concatenation 대신 FiLM 사용
             support_features = self.film(support_features, context_support.squeeze(1))
             support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
-            
             if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                 pass
             else:
                 unique_labels = torch.unique(support_labels)
                 support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 support_features = torch.stack(support_features)
-            # construct prototype [end]
 
-            # reduce distance between prototype and target [start]
+
+
             unique_labels = torch.unique(support_labels)
 
             n_queries = target_features.shape[0]
@@ -2852,10 +2844,8 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
                 cum_dists = OTAM_cum_dist_v2(dists)
             else:
                 cum_dists = OTAM_cum_dist_v2(dists) + OTAM_cum_dist_v2(rearrange(dists, 'tb sb ts ss -> tb sb ss ts'))
-            # reduce distance between prototype and target [end]
         
         else:
-            # Not used
             if hasattr(self.args.TRAIN, "EVAL_TEXT") and self.args.TRAIN.EVAL_TEXT:
                 unique_labels = torch.unique(support_labels)
                 support_features, target_features, text_features = self.get_feats(support_images, target_images, support_real_class) 
@@ -2875,7 +2865,7 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
                 cum_dists = -logits_per_image # 
                 class_text_logits = None
 
-            # Not used
+                
             elif hasattr(self.args.TRAIN, "COMBINE") and self.args.TRAIN.COMBINE:
                 # text_features = self.text_features_test[support_real_class.long()]
                 unique_labels = torch.unique(support_labels)
@@ -2958,43 +2948,34 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
                 support_bs = support_features.shape[0]
                 target_bs = target_features.shape[0]
                 
-                
-                # mean of frames CLIP [start]
                 feature_classification_in = torch.cat([support_features,target_features], dim=0)
                 feature_classification = self.classification_layer(feature_classification_in).mean(1)
                 class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
-                # mean of frames CLIP [end]
 
                 
                 if self.training:
                     context_support = self.text_features_train[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
+                
                 else:
                     context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
                 
                 target_features = self.context2(target_features, target_features, target_features)
-                
-                # construct prototype [start]
-                # if few-shot
                 if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                     unique_labels = torch.unique(support_labels)
                     support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                     support_features = torch.stack(support_features)
                     context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                     context_support = torch.stack(context_support)
-                # 여기 FiLM 들어가야함
                 support_features = torch.cat([support_features, context_support], dim=1)
                 support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
-
-                # if one-shot
                 if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                     pass
                 else:
                     unique_labels = torch.unique(support_labels)
                     support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                     support_features = torch.stack(support_features)
-                # construct prototype [end]
 
-                # reduce distance between prototype and target [start]
+
                 unique_labels = torch.unique(support_labels)
 
                 n_queries = target_features.shape[0]
@@ -3013,8 +2994,7 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
                     cum_dists = OTAM_cum_dist_v2(dists)
                 else:
                     cum_dists = OTAM_cum_dist_v2(dists) + OTAM_cum_dist_v2(rearrange(dists, 'tb sb ts ss -> tb sb ss ts'))
-                # reduce distance between prototype and target [end]
-
+        
 
 
         class_dists = [torch.mean(torch.index_select(cum_dists, 1, extract_class_indices(unique_labels, c)), dim=1) for c in unique_labels]
@@ -3092,55 +3072,41 @@ class DualFSAR(CNN_FSHead):
         import einops
         if self.training:
             B, T = support_images.shape[:2]
-            
-            # action feature extraction
-            action_q = [self.txt_processors["eval"](self.question['action']) for _ in range(B)]
+            action_q = [self.txt_processors(self.question['action']) for _ in range(B)]
             support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
             target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
             
-            support_features = self.backbone({'image' : support_images, 'text_input' : action_q}, mode="multimodal")
+            support_features = self.backbone({'image' : support_images, 'text_input' : action_q}, mode="multimodal")            
             target_features = self.backbone({'image' : target_images, 'text_input' : action_q}, mode="multimodal")
-            
-            # scene feature extraction
-            scene_q = [self.txt_processors["eval"](self.question['scene']) for _ in range(B)]
-            support_scene = self.backbone({'image' : support_images, 'text_input' : scene_q}, mode='multimodal')
-            target_scene = self.backbone({'image' : target_images, 'text_input' : scene_q}, mode='multimodal')
 
-            # dim = int(support_features['image_embeds'].shape[-1])
+            dim = int(support_features['image_embeds'].shape[-1])
 
-            # support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
-            # target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
+            support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
+            target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
             support_features_text = None
             
         else:
-            B, T = support_images.shape[:2]
-            
-            # action feature extraction
-            action_q = [self.txt_processors["eval"](self.question['action']) for _ in range(B)]
-            support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
-            target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
-            
-            support_features = self.backbone({'image' : support_images, 'text_input' : action_q})
-            target_features = self.backbone({'image' : target_images, 'text_input' : action_q})
+            question = [self.txt_processors["eval"](q) for q in question]
+            support_features = self.backbone({'image' : support_images, 'text_input' : question})
+            target_features = self.backbone({'image' : target_images, 'text_input' : question})
+            support_features = support_features['image_embeds']
+            target_features = target_features['image_embeds']
 
-            # scene feature extraction
-            scene_q = [self.txt_processors["eval"](self.question['scene']) for _ in range(B)]
-            support_scene = self.backbone({'image' : support_images, 'text_input' : scene_q}, mode='multimodal')
-            target_scene = self.backbone({'image' : target_images, 'text_input' : scene_q}, mode='multimodal')
-
+            dim = int(target_features.shape[1])
+            target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
+            support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
             # support_real_class = torch.unique(support_real_class)
             support_features_text = self.text_features_test[support_real_class.long()]
 
 
-        return support_features, target_features, support_features_text, support_scene, target_scene
+        return support_features, target_features, support_features_text
 
     def forward(self, inputs):
         support_images, support_labels, target_images, support_real_class = inputs['support_set'], inputs['support_labels'], inputs['target_set'], inputs['real_support_labels'] # [200, 3, 224, 224] inputs["real_support_labels"]
         
         # set_trace()
         if self.training:
-            support_features, target_features, _,  support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
-            
+            support_features, target_features, _ = self.get_feats(support_images, target_images, support_labels)
             support_bs = support_features.shape[0]
             target_bs = target_features.shape[0]
             
@@ -3200,7 +3166,7 @@ class DualFSAR(CNN_FSHead):
         else:
             if hasattr(self.args.TRAIN, "EVAL_TEXT") and self.args.TRAIN.EVAL_TEXT:
                 unique_labels = torch.unique(support_labels)
-                support_features, target_features, text_features, support_scene, target_scene = self.get_feats(support_images, target_images, support_real_class) 
+                support_features, target_features, text_features = self.get_feats(support_images, target_images, support_real_class) 
                 text_features = [torch.mean(torch.index_select(text_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 text_features = torch.stack(text_features)
                 # unique_labels = torch.unique(support_labels)
@@ -3221,7 +3187,7 @@ class DualFSAR(CNN_FSHead):
             elif hasattr(self.args.TRAIN, "COMBINE") and self.args.TRAIN.COMBINE:
                 # text_features = self.text_features_test[support_real_class.long()]
                 unique_labels = torch.unique(support_labels)
-                support_features, target_features, text_features, support_scene, target_scene = self.get_feats(support_images, target_images, support_real_class) 
+                support_features, target_features, text_features = self.get_feats(support_images, target_images, support_real_class) 
                 text_features = [torch.mean(torch.index_select(text_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 text_features = torch.stack(text_features)
                 # unique_labels = torch.unique(support_labels)
@@ -3296,7 +3262,7 @@ class DualFSAR(CNN_FSHead):
                 class_text_logits = None
 
             else:
-                support_features, target_features, _, support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+                support_features, target_features, _ = self.get_feats(support_images, target_images, support_labels)
                 support_bs = support_features.shape[0]
                 target_bs = target_features.shape[0]
                 
