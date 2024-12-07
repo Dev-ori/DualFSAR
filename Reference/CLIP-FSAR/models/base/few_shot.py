@@ -3030,7 +3030,8 @@ class DualFSAR(CNN_FSHead):
         from lavis.models import load_model_and_preprocess
         backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip_feature_extractor", model_type="base", is_eval=True, device='cuda')
         self.txt_processors = txt_processors
-        self.question = ["a action of", "a place of"]
+        self.question = {"action" : "a action of", 
+                         "scene" : "a place of"}
         
         with torch.no_grad():
             if hasattr(self.args.TEST, "PROMPT") and self.args.TEST.PROMPT:
@@ -3062,21 +3063,23 @@ class DualFSAR(CNN_FSHead):
             self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2)
         # set_trace()
                                                   
-        
+    
 
     def get_feats(self, support_images, target_images, support_real_class=False, support_labels=False):
         """
         Takes in images from the support set and query video and returns CNN features.
         """
+        import einops
         if self.training:
-            question = [self.txt_processors["eval"](q) for q in question]
-            support_features = self.backbone({'image' : support_images, 'text_input' : question})
-            # os.system("nvidia-smi")
-            support_features = support_features['image_embeds']
-            target_features = self.backbone({'image' : support_images, 'text_input' : question})
-            # os.system("nvidia-smi")
-            target_features = target_features['image_embeds']
-            dim = int(support_features.shape[1])
+            B, T = support_images.shape[:2]
+            action_q = [self.txt_processors(self.question['action']) for _ in range(B)]
+            support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
+            target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
+            
+            support_features = self.backbone({'image' : support_images, 'text_input' : action_q}, mode="multimodal")            
+            target_features = self.backbone({'image' : target_images, 'text_input' : action_q}, mode="multimodal")
+
+            dim = int(support_features['image_embeds'].shape[-1])
 
             support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
             target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
@@ -3085,7 +3088,7 @@ class DualFSAR(CNN_FSHead):
         else:
             question = [self.txt_processors["eval"](q) for q in question]
             support_features = self.backbone({'image' : support_images, 'text_input' : question})
-            target_features = self.backbone({'image' : support_images, 'text_input' : question})
+            target_features = self.backbone({'image' : target_images, 'text_input' : question})
             support_features = support_features['image_embeds']
             target_features = target_features['image_embeds']
 
