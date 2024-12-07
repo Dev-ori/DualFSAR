@@ -87,7 +87,7 @@ def train(local_rank, global_rank, args):
     
     # build dataset
     (dataset_train, dataloader_train), train_cfg = build_dataset(cfg=args.cfg_dataset, mode='train', global_rank=global_rank, world_size=args.world_size)
-    (dataset_valid, dataloader_valid), valid_cfg = build_dataset(cfg=args.cfg_dataset, mode='valid', global_rank=global_rank, world_size=args.world_size)
+    (dataset_valid, dataloader_valid), valid_cfg = build_dataset(cfg=args.cfg_dataset, mode='val', global_rank=global_rank, world_size=args.world_size)
     if args.test:
         (dataset_test, dataloader_test), test_cfg = build_dataset(cfg=args.cfg_dataset, mode='test', global_rank=global_rank, world_size=args.world_size)
     
