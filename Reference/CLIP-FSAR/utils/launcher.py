@@ -62,7 +62,8 @@ def run(
     print("num_shards (os.environ['WORLD_SIZE']): {}".format(num_shards))
     print("rank: {}".format(rank))
     print("local_rank (GPU_ID): {}".format(local_rank))
-
+    # os.environ['MASTER_PORT'] = '12345667'
+    # os.environ['MASTER_ADDR'] = "localhost"
     try:
         if cfg.PAI == False:
             torch.distributed.init_process_group(

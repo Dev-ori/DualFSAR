@@ -15,3 +15,4 @@ Reference/CLIP-FSAR/utils/__pycache__
 .idea/
 *.pyc
 /home/dhan/CursorProjects/DualFSAR/.idea
+features/

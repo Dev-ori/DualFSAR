@@ -2759,6 +2759,7 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
         """
         if self.training:
             support_features = self.backbone(support_images).squeeze()
+            print(support_features.shape)
             # os.system("nvidia-smi")
             target_features = self.backbone(target_images).squeeze()
             # os.system("nvidia-smi")
@@ -2767,7 +2768,8 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
 
             support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
             target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
-            support_features_text = None
+            
+            # support_features_text = None
             
         else:
             support_features = self.backbone(support_images).squeeze()
@@ -2786,7 +2788,7 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
         
         # set_trace()
         if self.training:
-            support_features, target_features, _ = self.get_feats(support_images, target_images, support_labels)
+            support_features, target_features, _ = self.get_feats(support_images, target_images, support_real_class)
             support_bs = support_features.shape[0]
             target_bs = target_features.shape[0]
             
@@ -3045,10 +3047,18 @@ class DualFSAR(CNN_FSHead):
         args = cfg
         self.args = cfg
         import sys
-        sys.path.append("LAVIS")
-            
+        sys.path.append("../../LAVIS")
+        
+        # backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
+        # self.backbone = backbone.visual    # model.load_state_dict(state_dict)
+        self.class_real_train = cfg.TRAIN.CLASS_NAME
+        self.class_real_test = cfg.TEST.CLASS_NAME
+        self.mid_dim = 768
+
         from lavis.models import load_model_and_preprocess
-        backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip_feature_extractor", model_type="base", is_eval=True, device='cuda')
+        backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip_feature_extractor", model_type="base", is_eval=False, device='cuda')
+        self.backbone = backbone
+        # self.backbone.eval()
         self.txt_processors = txt_processors
         self.question = {"action" : "a action of", 
                          "scene" : "a place of"}
@@ -3059,77 +3069,122 @@ class DualFSAR(CNN_FSHead):
             else:# a place {classname_GEN}, a photo of long jump , place of {} 
                 text_templete = ["a photo of {}".format(self.class_real_train[int(ii)]) for ii in range(len(self.class_real_train))]
             # text_templete = tokenize(text_templete).cuda()
-            text_templete = txt_processors(text_templete)
-            self.text_features_train = backbone.extract_features(sample = {"text" : text_templete}, mode="text")
+            text_templete = [txt_processors['eval'](t) for t in text_templete]
+            # print(text_templete)
+            self.text_features_train = backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
 
             if hasattr(self.args.TEST, "PROMPT") and self.args.TEST.PROMPT:
                 text_templete = [self.args.TEST.PROMPT.format(self.class_real_test[int(ii)]) for ii in range(len(self.class_real_test))]
             else:
                 text_templete = ["a photo of {}".format(self.class_real_test[int(ii)]) for ii in range(len(self.class_real_test))]
             # text_templete = tokenize(text_templete).cuda()
-            text_templete = txt_processors(text_templete)
+            text_templete = [txt_processors['eval'](t) for t in text_templete]
             
-            self.text_features_test = backbone.extract_features(sample = {"text" : text_templete}, mode="text")
+            self.text_features_test = backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
         
-        
-        self.mid_layer = nn.Sequential() 
-        self.classification_layer = nn.Sequential() 
+        self.multimodal_linear = nn.Sequential(nn.Linear(in_features=self.mid_dim * 2, out_features=self.mid_dim),
+                                                nn.GELU(),
+                                                nn.LayerNorm(self.mid_dim))
+        self.before_transformer = nn.Sequential(nn.Linear(in_features=self.mid_dim * 2, out_features=self.mid_dim),
+                                                nn.GELU(),
+                                                nn.LayerNorm(self.mid_dim))
+        self.mid_layer = nn.Sequential(nn.Linear(256, self.mid_dim),
+                                       nn.LayerNorm(self.mid_dim))
+        self.classification_layer = nn.Sequential(nn.Linear(in_features=self.mid_dim, out_features=256)) 
         self.scale = nn.Parameter(torch.FloatTensor(1), requires_grad=True)
         self.scale.data.fill_(1.0)
+        self.scale2 = nn.Parameter(torch.FloatTensor(1), requires_grad=True)
+        self.scale2.data.fill_(1.0)
         
         if hasattr(self.args.TRAIN, "TRANSFORMER_DEPTH") and self.args.TRAIN.TRANSFORMER_DEPTH:
             self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2, depth=int(self.args.TRAIN.TRANSFORMER_DEPTH))
         else:
             self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2)
         # set_trace()
-                                                  
+        
+                       
     
-
+    # @torch.no_grad()
     def get_feats(self, support_images, target_images, support_real_class=False, support_labels=False):
         """
         Takes in images from the support set and query video and returns CNN features.
         """
         import einops
         if self.training:
-            B, T = support_images.shape[:2]
-            
+            # B, T = support_images.shape[:2]
+            sup_B, sup_T = support_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+            tar_B, tar_T = target_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+
             # action feature extraction
-            action_q = [self.txt_processors["eval"](self.question['action']) for _ in range(B)]
-            support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
-            target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
+            action_q = [self.txt_processors["train"](self.question['action'])]
+            # support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
+            # target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
             
-            support_features = self.backbone({'image' : support_images, 'text_input' : action_q}, mode="multimodal")
-            target_features = self.backbone({'image' : target_images, 'text_input' : action_q}, mode="multimodal")
+            support_features = self.backbone.extract_features({'image' : support_images, 'text_input' : action_q * (sup_B * sup_T)}, mode="multimodal")
+            target_features = self.backbone.extract_features({'image' : target_images, 'text_input' : action_q * (tar_B * tar_T)}, mode="multimodal")
             
             # scene feature extraction
-            scene_q = [self.txt_processors["eval"](self.question['scene']) for _ in range(B)]
-            support_scene = self.backbone({'image' : support_images, 'text_input' : scene_q}, mode='multimodal')
-            target_scene = self.backbone({'image' : target_images, 'text_input' : scene_q}, mode='multimodal')
+            scene_q = [self.txt_processors["train"](self.question['scene'])]
+            support_scene = self.backbone.extract_features({'image' : support_images, 'text_input' : scene_q * (sup_B * sup_T)}, mode='multimodal')
+            target_scene = self.backbone.extract_features({'image' : target_images, 'text_input' : scene_q * (tar_B * tar_T)}, mode='multimodal')
 
-            # dim = int(support_features['image_embeds'].shape[-1])
+            # # dim = int(support_features['image_embeds'].shape[-1])
+            # text_templete = ["a photo of {}".format(self.class_real_train[int(ii)]) for ii in support_real_class]
+            # # text_templete = tokenize(text_templete).cuda()
+            # print(text_templete)
+            # text_templete = [self.txt_processors['train'](t) for t in text_templete]
+            # # print(text_templete)
+            # support_features_text = self.backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
 
-            # support_features = support_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
+
+            support_features['image_embeds'] = einops.rearrange(support_features['image_embeds'][:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_features['multimodal_embeds'] = einops.rearrange(support_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            target_features['image_embeds'] = einops.rearrange(target_features['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_features['multimodal_embeds'] = einops.rearrange(target_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+            support_scene['image_embeds'] = einops.rearrange(support_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_scene['multimodal_embeds'] = einops.rearrange(support_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            target_scene['image_embeds'] = einops.rearrange(target_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_scene['multimodal_embeds'] = einops.rearrange(target_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+
             # target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
             support_features_text = None
             
         else:
-            B, T = support_images.shape[:2]
-            
-            # action feature extraction
-            action_q = [self.txt_processors["eval"](self.question['action']) for _ in range(B)]
-            support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
-            target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
-            
-            support_features = self.backbone({'image' : support_images, 'text_input' : action_q})
-            target_features = self.backbone({'image' : target_images, 'text_input' : action_q})
+            # B, T = support_images.shape[:2]
+            sup_B, sup_T = support_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+            tar_B, tar_T = target_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
 
+            # action feature extraction
+            action_q = [self.txt_processors["train"](self.question['action'])]
+            # support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
+            # target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
+            
+            support_features = self.backbone.extract_features({'image' : support_images, 'text_input' : action_q * (sup_B * sup_T)}, mode="multimodal")
+            target_features = self.backbone.extract_features({'image' : target_images, 'text_input' : action_q * (tar_B * tar_T)}, mode="multimodal")
+            
             # scene feature extraction
-            scene_q = [self.txt_processors["eval"](self.question['scene']) for _ in range(B)]
-            support_scene = self.backbone({'image' : support_images, 'text_input' : scene_q}, mode='multimodal')
-            target_scene = self.backbone({'image' : target_images, 'text_input' : scene_q}, mode='multimodal')
+            scene_q = [self.txt_processors["train"](self.question['scene'])]
+            support_scene = self.backbone.extract_features({'image' : support_images, 'text_input' : scene_q * (sup_B * sup_T)}, mode='multimodal')
+            target_scene = self.backbone.extract_features({'image' : target_images, 'text_input' : scene_q * (tar_B * tar_T)}, mode='multimodal')
 
             # support_real_class = torch.unique(support_real_class)
+            
+            support_features['image_embeds'] = einops.rearrange(support_features['image_embeds'][:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_features['multimodal_embeds'] = einops.rearrange(support_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            target_features['image_embeds'] = einops.rearrange(target_features['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_features['multimodal_embeds'] = einops.rearrange(target_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+            support_scene['image_embeds'] = einops.rearrange(support_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_scene['multimodal_embeds'] = einops.rearrange(support_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            target_scene['image_embeds'] = einops.rearrange(target_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_scene['multimodal_embeds'] = einops.rearrange(target_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+
             support_features_text = self.text_features_test[support_real_class.long()]
+            # # dim = int(support_features['image_embeds'].shape[-1])
+            # text_templete = ["a photo of {}".format(self.class_real_test[int(ii)]) for ii in support_real_class]
+            # # text_templete = tokenize(text_templete).cuda()
+            # text_templete = [self.txt_processors['train'](t) for t in text_templete]
+            # # print(text_templete)
+            # support_features_text = self.backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
 
 
         return support_features, target_features, support_features_text, support_scene, target_scene
@@ -3139,18 +3194,26 @@ class DualFSAR(CNN_FSHead):
         
         # set_trace()
         if self.training:
-            support_features, target_features, _,  support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
-            
+            support_action, target_action, _,  support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+            # print(support_action.multimodal_embeds.shape)
+            support_features = self.multimodal_linear(torch.concat([support_action.multimodal_embeds, support_scene.multimodal_embeds], dim=-1))
+            target_features = self.multimodal_linear(torch.concat([target_action.multimodal_embeds, target_scene.multimodal_embeds], dim=-1))
             support_bs = support_features.shape[0]
             target_bs = target_features.shape[0]
             
-            
+            # mean of frames CLIP [start]
             if hasattr(self.args.TRAIN, "USE_CLASSIFICATION") and self.args.TRAIN.USE_CLASSIFICATION:
-                feature_classification_in = torch.cat([support_features,target_features], dim=0)
+                feature_classification_in = torch.cat([support_action.image_embeds, target_action.image_embeds], dim=0)
                 feature_classification = self.classification_layer(feature_classification_in).mean(1)
                 class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
+                
+                feature_classification_in_multi = torch.cat([support_features, target_features], dim=0)
+                feature_classification_multi = self.classification_layer(feature_classification_in_multi).mean(1)
+                class_text_logits_multi = cos_sim(feature_classification_multi, self.text_features_train)*self.scale2
+                class_text_logits = class_text_logits + class_text_logits_multi
             else:
                 class_text_logits = None
+            # mean of frames CLIP [end]
             
             
             if self.training:
@@ -3159,14 +3222,19 @@ class DualFSAR(CNN_FSHead):
             else:
                 context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
             
+            target_features = self.before_transformer(torch.cat([target_features, target_action.image_embeds], dim=-1))
+            support_features  = self.before_transformer(torch.cat([support_features, support_action.image_embeds], dim=-1)) 
             target_features = self.context2(target_features, target_features, target_features)
             context_support = self.mid_layer(context_support) 
+            # context_support = context_support.unsqueeze(1).repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
             if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                 unique_labels = torch.unique(support_labels)
                 support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 support_features = torch.stack(support_features)
                 context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
                 context_support = torch.stack(context_support)
+            # print(context_support.shape)
+            # print(support_features.shape)
             support_features = torch.cat([support_features, context_support], dim=1)
             support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
             if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
@@ -3296,13 +3364,26 @@ class DualFSAR(CNN_FSHead):
                 class_text_logits = None
 
             else:
-                support_features, target_features, _, support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+                support_action, target_action, _,  support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+                support_features = self.multimodal_linear(torch.concat([support_action.multimodal_embeds, support_scene.multimodal_embeds], dim=-1))
+                target_features = self.multimodal_linear(torch.concat([target_action.multimodal_embeds, target_scene.multimodal_embeds], dim=-1))
                 support_bs = support_features.shape[0]
                 target_bs = target_features.shape[0]
-                
-                feature_classification_in = torch.cat([support_features,target_features], dim=0)
+
+                # support_features, target_features, _, support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+                # support_bs = support_features.shape[0]
+                # target_bs = target_features.shape[0]
+                feature_classification_in = torch.cat([support_action.image_embeds, target_action.image_embeds], dim=0)
                 feature_classification = self.classification_layer(feature_classification_in).mean(1)
                 class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
+                
+                feature_classification_in_multi = torch.cat([support_features, target_features], dim=0)
+                feature_classification_multi = self.classification_layer(feature_classification_in_multi).mean(1)
+                class_text_logits_multi = cos_sim(feature_classification_multi, self.text_features_train)*self.scale2
+                class_text_logits = class_text_logits + class_text_logits_multi
+                # feature_classification_in = torch.cat([support_features,target_features], dim=0)
+                # feature_classification = self.classification_layer(feature_classification_in).mean(1)
+                # class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
 
                 
                 if self.training:
@@ -3310,8 +3391,12 @@ class DualFSAR(CNN_FSHead):
                 
                 else:
                     context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
-                
+
+                target_features = self.before_transformer(torch.cat([target_features, target_action.image_embeds], dim=-1))
+                support_features = self.before_transformer(torch.cat([support_features, support_action.image_embeds], dim=-1)) 
                 target_features = self.context2(target_features, target_features, target_features)
+                context_support = self.mid_layer(context_support) 
+                
                 if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
                     unique_labels = torch.unique(support_labels)
                     support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
@@ -3357,5 +3442,434 @@ class DualFSAR(CNN_FSHead):
 
     def loss(self, task_dict, model_dict):
         return F.cross_entropy(model_dict["logits"], task_dict["target_labels"].long())
+
+
+
+
+@HEAD_REGISTRY.register()
+class DualFSARBLIP2(CNN_FSHead):
+    """
+    OTAM with a CNN backbone.
+    """
+    def __init__(self, cfg):
+        super(DualFSARBLIP2, self).__init__(cfg)
+        args = cfg
+        self.args = cfg
+        import sys
+        sys.path.append("../../LAVIS")
+        
+        
+        if cfg.VIDEO.HEAD.BACKBONE_NAME=="RN50":
+            backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
+            # self.backbone = backbone.visual    # model.load_state_dict(state_dict)
+            self.class_real_train = cfg.TRAIN.CLASS_NAME
+            self.class_real_test = cfg.TEST.CLASS_NAME
+            # self.mid_dim = 1024
+        elif cfg.VIDEO.HEAD.BACKBONE_NAME=="ViT-B/16":
+            backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
+            # self.backbone = backbone.visual   # model.load_state_dict(state_dict)
+            self.class_real_train = cfg.TRAIN.CLASS_NAME
+            self.class_real_test = cfg.TEST.CLASS_NAME
+            # backbone, self.preprocess = load("RN50", device="cuda", cfg=cfg, jit=False)
+            # self.backbone = backbone.visual model.load_state_dict(state_dict)
+            # self.backbone = CLIP
+            # self.mid_dim = 512
+        self.mid_dim = 768
+        with torch.no_grad():
+            if hasattr(self.args.TEST, "PROMPT") and self.args.TEST.PROMPT:
+                text_templete = [self.args.TEST.PROMPT.format(self.class_real_train[int(ii)]) for ii in range(len(self.class_real_train))]
+            else:# a place {classname_GEN}, a photo of long jump , place of {} 
+                text_templete = ["a photo of {}".format(self.class_real_train[int(ii)]) for ii in range(len(self.class_real_train))]
+            text_templete = tokenize(text_templete).cuda()
+            self.text_features_train = backbone.encode_text(text_templete)
+
+            if hasattr(self.args.TEST, "PROMPT") and self.args.TEST.PROMPT:
+                text_templete = [self.args.TEST.PROMPT.format(self.class_real_test[int(ii)]) for ii in range(len(self.class_real_test))]
+            else:
+                text_templete = ["a photo of {}".format(self.class_real_test[int(ii)]) for ii in range(len(self.class_real_test))]
+            text_templete = tokenize(text_templete).cuda()
+            
+            self.text_features_test = backbone.encode_text(text_templete)
+        
+        # backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
+        # self.backbone = backbone.visual    # model.load_state_dict(state_dict)
+        # self.class_real_train = cfg.TRAIN.CLASS_NAME
+        # self.class_real_test = cfg.TEST.CLASS_NAME
+        # self.mid_dim = 768
+
+        from lavis.models import load_model_and_preprocess
+        backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip_vqa", model_type="vqav2", is_eval=False, device='cuda')
+        self.backbone = backbone
+        # self.backbone.eval()
+        self.txt_processors = txt_processors
+        self.question = {"action" : "a action of", 
+                         "scene" : "a place of"}
+        
+        
+        self.multimodal_linear = nn.Sequential(nn.Linear(in_features=self.mid_dim * 2, out_features=self.mid_dim),
+                                                nn.GELU(),
+                                                nn.LayerNorm(self.mid_dim))
+        self.before_transformer = nn.Sequential(nn.Linear(in_features=self.mid_dim * 2, out_features=self.mid_dim),
+                                                nn.GELU(),
+                                                nn.LayerNorm(self.mid_dim))
+        self.mid_layer = nn.Sequential(nn.Linear(256, self.mid_dim),
+                                       nn.LayerNorm(self.mid_dim))
+        self.classification_layer = nn.Sequential(nn.Linear(in_features=self.mid_dim, out_features=256)) 
+        self.scale = nn.Parameter(torch.FloatTensor(1), requires_grad=True)
+        self.scale.data.fill_(1.0)
+        
+        if hasattr(self.args.TRAIN, "TRANSFORMER_DEPTH") and self.args.TRAIN.TRANSFORMER_DEPTH:
+            self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2, depth=int(self.args.TRAIN.TRANSFORMER_DEPTH))
+        else:
+            self.context2 = Transformer_v1(dim=self.mid_dim, heads = 8, dim_head_k = self.mid_dim//8, dropout_atte = 0.2)
+        # set_trace()
+        
+                       
+    
+    # @torch.no_grad()
+    def get_feats(self, support_images, target_images, support_real_class=False, support_labels=False):
+        """
+        Takes in images from the support set and query video and returns CNN features.
+        """
+        import einops
+        if self.training:
+            # B, T = support_images.shape[:2]
+            sup_B, sup_T = support_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+            tar_B, tar_T = target_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+
+            # action feature extraction
+            action_q = [self.txt_processors["train"](self.question['action'])]
+            # support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
+            # target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
+            
+            support_features, support_image_embeds_img = self.backbone.forward_encoder({'image' : support_images, 'text_input' : action_q * (sup_B * sup_T)})
+            target_features, target_image_embeds_img = self.backbone.forward_encoder({'image' : target_images, 'text_input' : action_q * (tar_B * tar_T)})
+            
+            # scene feature extraction
+            scene_q = [self.txt_processors["train"](self.question['scene'])]
+            support_scene, support_image_embeds_scene = self.backbone.forward_encoder({'image' : support_images, 'text_input' : scene_q * (sup_B * sup_T)})
+            target_scene, target_image_embeds_scene = self.backbone.forward_encoder({'image' : target_images, 'text_input' : scene_q * (tar_B * tar_T)})
+
+            support_image_embeds = support_image_embeds_img + support_image_embeds_scene
+            target_image_embeds = target_image_embeds_img + target_image_embeds_scene
+
+            support_action_features = einops.rearrange(support_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_scene_features = einops.rearrange(support_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_image_embeds = einops.rearrange(support_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # # dim = int(support_features['image_embeds'].shape[-1])
+            # text_templete = ["a photo of {}".format(self.class_real_train[int(ii)]) for ii in support_real_class]
+            # # text_templete = tokenize(text_templete).cuda()
+            # print(text_templete)
+            # text_templete = [self.txt_processors['train'](t) for t in text_templete]
+            # # print(text_templete)
+            # support_features_text = self.backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
+
+            
+            
+            # support_features['image_embeds'] = einops.rearrange(support_features['image_embeds'][:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # support_features['multimodal_embeds'] = einops.rearrange(support_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            # target_features['image_embeds'] = einops.rearrange(target_features['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            # target_features['multimodal_embeds'] = einops.rearrange(target_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+            # support_scene['image_embeds'] = einops.rearrange(support_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # support_scene['multimodal_embeds'] = einops.rearrange(support_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            # target_scene['image_embeds'] = einops.rearrange(target_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            # target_scene['multimodal_embeds'] = einops.rearrange(target_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+
+            # target_features = target_features.reshape(-1, self.args.DATA.NUM_INPUT_FRAMES, dim)
+            support_features_text = None
+            
+        else:
+            # B, T = support_images.shape[:2]
+            sup_B, sup_T = support_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+            tar_B, tar_T = target_images.shape[0] // self.args.DATA.NUM_INPUT_FRAMES, self.args.DATA.NUM_INPUT_FRAMES
+
+            # action feature extraction
+            action_q = [self.txt_processors["train"](self.question['action'])]
+            # support_images = einops.rearrange(support_images, "B T C H W -> (B T) C H W")
+            # target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
+            support_features, support_image_embeds_img = self.backbone.forward_encoder({'image' : support_images, 'text_input' : action_q * (sup_B * sup_T)})
+            target_features, target_image_embeds_img = self.backbone.forward_encoder({'image' : target_images, 'text_input' : action_q * (tar_B * tar_T)})
+            
+            # scene feature extraction
+            scene_q = [self.txt_processors["train"](self.question['scene'])]
+            support_scene, support_image_embeds_scene = self.backbone.forward_encoder({'image' : support_images, 'text_input' : scene_q * (sup_B * sup_T)})
+            target_scene, target_image_embeds_scene = self.backbone.forward_encoder({'image' : target_images, 'text_input' : scene_q * (tar_B * tar_T)})
+
+            support_image_embeds = support_image_embeds_img + support_image_embeds_scene
+            target_image_embeds = target_image_embeds_img + target_image_embeds_scene
+            
+            support_action_features = einops.rearrange(support_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_scene_features = einops.rearrange(support_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            support_image_embeds = einops.rearrange(support_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # support_real_class = torch.unique(support_real_class)
+            
+            # support_features['image_embeds'] = einops.rearrange(support_features['image_embeds'][:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # support_features['multimodal_embeds'] = einops.rearrange(support_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            # target_features['image_embeds'] = einops.rearrange(target_features['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            # target_features['multimodal_embeds'] = einops.rearrange(target_features['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+            # support_scene['image_embeds'] = einops.rearrange(support_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=sup_B, T=sup_T)
+            # support_scene['multimodal_embeds'] = einops.rearrange(support_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=sup_B, T=sup_T)
+            # target_scene['image_embeds'] = einops.rearrange(target_scene['image_embeds'][:, 0, :],  '(B T) D -> B T D', B=tar_B, T=tar_T)
+            # target_scene['multimodal_embeds'] = einops.rearrange(target_scene['multimodal_embeds'][:, 0, :], "(B T) D -> B T D", B=tar_B, T=tar_T)
+
+            support_features_text = self.text_features_test[support_real_class.long()]
+            # # dim = int(support_features['image_embeds'].shape[-1])
+            # text_templete = ["a photo of {}".format(self.class_real_test[int(ii)]) for ii in support_real_class]
+            # # text_templete = tokenize(text_templete).cuda()
+            # text_templete = [self.txt_processors['train'](t) for t in text_templete]
+            # # print(text_templete)
+            # support_features_text = self.backbone.extract_features(samples = {"text_input" : text_templete}, mode="text").text_embeds_proj[:, 0, :]
+
+
+        return support_action_features, support_scene_features, target_action_features, target_scene_features, support_image_embeds, target_image_embeds
+
+    def forward(self, inputs):
+        support_images, support_labels, target_images, support_real_class = inputs['support_set'], inputs['support_labels'], inputs['target_set'], inputs['real_support_labels'] # [200, 3, 224, 224] inputs["real_support_labels"]
+        
+        # set_trace()
+        if self.training:
+            support_action_features, support_scene_features, target_action_features, target_scene_features, support_image_embeds, target_image_embeds = self.get_feats(support_images, target_images, support_labels)
+            # print(support_action.multimodal_embeds.shape)
+            support_features = self.multimodal_linear(torch.concat([support_action_features, support_scene_features], dim=-1))
+            target_features = self.multimodal_linear(torch.concat([target_action_features, target_scene_features], dim=-1))
+            support_bs = support_features.shape[0]
+            target_bs = target_features.shape[0]
+            
+            # mean of frames CLIP [start]
+            if hasattr(self.args.TRAIN, "USE_CLASSIFICATION") and self.args.TRAIN.USE_CLASSIFICATION:
+                feature_classification_in_multi = torch.cat([support_features, target_features], dim=0)
+                feature_classification_multi = self.classification_layer(feature_classification_in_multi).mean(1)
+                class_text_logits = cos_sim(feature_classification_multi, self.text_features_train)*self.scale
+            else:
+                class_text_logits = None
+            # mean of frames CLIP [end]
+            
+            
+            if self.training:
+                context_support = self.text_features_train[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
+            
+            else:
+                context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
+            
+            target_features = self.before_transformer(torch.cat([target_features, target_image_embeds], dim=-1))
+            support_features  = self.before_transformer(torch.cat([support_features, support_image_embeds], dim=-1)) 
+            target_features = self.context2(target_features, target_features, target_features)
+            context_support = self.mid_layer(context_support) 
+            # context_support = context_support.unsqueeze(1).repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
+            if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                unique_labels = torch.unique(support_labels)
+                support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                support_features = torch.stack(support_features)
+                context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                context_support = torch.stack(context_support)
+            # print(context_support.shape)
+            # print(support_features.shape)
+            support_features = torch.cat([support_features, context_support], dim=1)
+            support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
+            if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                pass
+            else:
+                unique_labels = torch.unique(support_labels)
+                support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                support_features = torch.stack(support_features)
+
+
+
+            unique_labels = torch.unique(support_labels)
+
+            n_queries = target_features.shape[0]
+            n_support = support_features.shape[0]
+
+            support_features = rearrange(support_features, 'b s d -> (b s) d')  
+            target_features = rearrange(target_features, 'b s d -> (b s) d')    
+
+            frame_sim = cos_sim(target_features, support_features)  
+            frame_dists = 1 - frame_sim
+            
+            dists = rearrange(frame_dists, '(tb ts) (sb ss) -> tb sb ts ss', tb = n_queries, sb = n_support)  # [25, 25, 8, 8]
+
+            # calculate query -> support and support -> query
+            if hasattr(self.args.TRAIN, "SINGLE_DIRECT") and self.args.TRAIN.SINGLE_DIRECT:
+                cum_dists = OTAM_cum_dist_v2(dists)
+            else:
+                cum_dists = OTAM_cum_dist_v2(dists) + OTAM_cum_dist_v2(rearrange(dists, 'tb sb ts ss -> tb sb ss ts'))
+        
+        else:
+            if hasattr(self.args.TRAIN, "EVAL_TEXT") and self.args.TRAIN.EVAL_TEXT:
+                unique_labels = torch.unique(support_labels)
+                support_features, target_features, text_features, support_scene, target_scene = self.get_feats(support_images, target_images, support_real_class) 
+                text_features = [torch.mean(torch.index_select(text_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                text_features = torch.stack(text_features)
+                # unique_labels = torch.unique(support_labels)
+                image_features = self.classification_layer(target_features.mean(1))
+                image_features = image_features / image_features.norm(dim=1, keepdim=True)
+                text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+                # cosine similarity as logits
+                logit_scale = self.scale # 1. # self.backbone.logit_scale.exp()
+                logits_per_image = logit_scale * image_features @ text_features.t()
+                logits_per_text = logits_per_image.t()
+                logits_per_image = F.softmax(logits_per_image, dim=1)
+                
+                cum_dists = -logits_per_image # 
+                class_text_logits = None
+
+                
+            elif hasattr(self.args.TRAIN, "COMBINE") and self.args.TRAIN.COMBINE:
+                # text_features = self.text_features_test[support_real_class.long()]
+                unique_labels = torch.unique(support_labels)
+                support_features, target_features, text_features, support_scene, target_scene = self.get_feats(support_images, target_images, support_real_class) 
+                text_features = [torch.mean(torch.index_select(text_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                text_features = torch.stack(text_features)
+                # unique_labels = torch.unique(support_labels)
+                image_features = self.classification_layer(target_features.mean(1))
+                image_features = image_features / image_features.norm(dim=1, keepdim=True)
+                text_features = text_features / text_features.norm(dim=1, keepdim=True)
+
+                # cosine similarity as logits
+                logit_scale = self.scale # 1. # self.backbone.logit_scale.exp()
+                logits_per_image = logit_scale * image_features @ text_features.t()
+                logits_per_text = logits_per_image.t()
+                logits_per_image = F.softmax(logits_per_image, dim=1)
+                
+                class_text_logits = None
+
+                support_bs = support_features.shape[0]
+                target_bs = target_features.shape[0]
+                
+                feature_classification_in = torch.cat([support_features,target_features], dim=0)
+                feature_classification = self.classification_layer(feature_classification_in).mean(1)
+                class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
+
+                if self.training:
+                    context_support = self.text_features_train[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
+                
+                else:
+                    context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
+                
+                target_features = self.context2(target_features, target_features, target_features)
+                context_support = self.mid_layer(context_support)  # F.relu(self.mid_layer(context_support))
+                if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                    unique_labels = torch.unique(support_labels)
+                    support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    support_features = torch.stack(support_features)
+                    context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    context_support = torch.stack(context_support)
+                support_features = torch.cat([support_features, context_support], dim=1)
+                support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
+                if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                    pass
+                else:
+                    unique_labels = torch.unique(support_labels)
+                    support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    support_features = torch.stack(support_features)
+
+
+
+                unique_labels = torch.unique(support_labels)
+
+                n_queries = target_features.shape[0]
+                n_support = support_features.shape[0]
+
+                support_features = rearrange(support_features, 'b s d -> (b s) d')  
+                target_features = rearrange(target_features, 'b s d -> (b s) d')    
+
+                frame_sim = cos_sim(target_features, support_features)    
+                frame_dists = 1 - frame_sim
+                
+                dists = rearrange(frame_dists, '(tb ts) (sb ss) -> tb sb ts ss', tb = n_queries, sb = n_support)  # [25, 25, 8, 8]
+
+                # calculate query -> support and support -> query
+                if hasattr(self.args.TRAIN, "SINGLE_DIRECT") and self.args.TRAIN.SINGLE_DIRECT:
+                    cum_dists_visual = OTAM_cum_dist_v2(dists)
+                else:
+                    cum_dists_visual = OTAM_cum_dist_v2(dists) + OTAM_cum_dist_v2(rearrange(dists, 'tb sb ts ss -> tb sb ss ts'))
+                cum_dists_visual_soft = F.softmax((8-cum_dists_visual)/8., dim=1)
+                if hasattr(self.args.TRAIN, "TEXT_COFF") and self.args.TRAIN.TEXT_COFF:
+                    cum_dists = -(logits_per_image.pow(self.args.TRAIN.TEXT_COFF)*cum_dists_visual_soft.pow(1.0-self.args.TRAIN.TEXT_COFF))
+                else:
+                    cum_dists = -(logits_per_image.pow(0.9)*cum_dists_visual_soft.pow(0.1))
+                
+                class_text_logits = None
+
+            else:
+                support_action_features, support_scene_features, target_action_features, target_scene_features, support_image_embeds, target_image_embeds = self.get_feats(support_images, target_images, support_labels)
+                support_features = self.multimodal_linear(torch.concat([support_action_features, support_scene_features], dim=-1))
+                target_features = self.multimodal_linear(torch.concat([target_action_features, target_scene_features], dim=-1))
+                support_bs = support_features.shape[0]
+                target_bs = target_features.shape[0]
+
+                # support_features, target_features, _, support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
+                # support_bs = support_features.shape[0]
+                # target_bs = target_features.shape[0]
+                
+                feature_classification_in = torch.cat([support_features,target_features], dim=0)
+                feature_classification = self.classification_layer(feature_classification_in).mean(1)
+                class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
+
+                
+                if self.training:
+                    context_support = self.text_features_train[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1)
+                
+                else:
+                    context_support = self.text_features_test[support_real_class.long()].unsqueeze(1)#.repeat(1, self.args.DATA.NUM_INPUT_FRAMES, 1) # .repeat(support_bs+target_bs, 1, 1)
+
+                target_features = self.before_transformer(torch.cat([target_features, target_image_embeds], dim=-1))
+                support_features = self.before_transformer(torch.cat([support_features, support_image_embeds], dim=-1)) 
+                target_features = self.context2(target_features, target_features, target_features)
+                context_support = self.mid_layer(context_support) 
+                
+                if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                    unique_labels = torch.unique(support_labels)
+                    support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    support_features = torch.stack(support_features)
+                    context_support = [torch.mean(torch.index_select(context_support, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    context_support = torch.stack(context_support)
+                support_features = torch.cat([support_features, context_support], dim=1)
+                support_features = self.context2(support_features, support_features, support_features)[:,:self.args.DATA.NUM_INPUT_FRAMES,:]
+                if hasattr(self.args.TRAIN, "MERGE_BEFORE") and self.args.TRAIN.MERGE_BEFORE:
+                    pass
+                else:
+                    unique_labels = torch.unique(support_labels)
+                    support_features = [torch.mean(torch.index_select(support_features, 0, extract_class_indices(support_labels, c)), dim=0) for c in unique_labels]
+                    support_features = torch.stack(support_features)
+
+
+                unique_labels = torch.unique(support_labels)
+
+                n_queries = target_features.shape[0]
+                n_support = support_features.shape[0]
+
+                support_features = rearrange(support_features, 'b s d -> (b s) d')  # [200, 2048]
+                target_features = rearrange(target_features, 'b s d -> (b s) d')    # [200, 2048]
+
+                frame_sim = cos_sim(target_features, support_features)    # [200, 200]
+                frame_dists = 1 - frame_sim
+                
+                dists = rearrange(frame_dists, '(tb ts) (sb ss) -> tb sb ts ss', tb = n_queries, sb = n_support)  # [25, 25, 8, 8]
+
+                # calculate query -> support and support -> query
+                if hasattr(self.args.TRAIN, "SINGLE_DIRECT") and self.args.TRAIN.SINGLE_DIRECT:
+                    cum_dists = OTAM_cum_dist_v2(dists)
+                else:
+                    cum_dists = OTAM_cum_dist_v2(dists) + OTAM_cum_dist_v2(rearrange(dists, 'tb sb ts ss -> tb sb ss ts'))
+        
+
+
+        class_dists = [torch.mean(torch.index_select(cum_dists, 1, extract_class_indices(unique_labels, c)), dim=1) for c in unique_labels]
+        class_dists = torch.stack(class_dists)
+        class_dists = rearrange(class_dists, 'c q -> q c')
+        return_dict = {'logits': - class_dists, "class_logits": class_text_logits}
+        return return_dict
+
+    def loss(self, task_dict, model_dict):
+        return F.cross_entropy(model_dict["logits"], task_dict["target_labels"].long())
+
 
 
