@@ -3036,7 +3036,50 @@ class CNN_OTAM_CLIPFSAR(CNN_FSHead):
 #     from lavis.models import load_model_and_preprocess
 #     model, vis_processors, txt_processors = load_model_and_preprocess(name="blip_vqa", model_type="vqav2", is_eval=True, device=device)
     
+# import sys
+# sys.path.append("../../LAVIS")
 
+# from lavis.models.blip_models.blip_feature_extractor import BlipFeatureExtractor
+# from lavis.models import load_model_and_preprocess
+# class BLIP(BlipFeatureExtractor):
+#     def __init__(self, image_encoder, text_encoder, embed_dim, max_txt_len=40):
+#         super().__init__(image_encoder, text_encoder, embed_dim, max_txt_len)
+        
+#         self.scene_token = nn.Parameter(torch.zero(1, 1, embed_dim))
+#         self.action_token = nn.Parameter(torch.zero(1, 1, embed_dim))
+        
+#     def forward(self, samples):
+#         image = samples.get("image")
+#         scene_caption = samples.get("scene_text_input")
+#         action_caption = samples.get("action_text_input")
+
+#         with torch.no_grad():
+#             image_embeds = self.visual_encoder.forward_features(image)
+
+#         image_atts = torch.ones(image_embeds.size()[:-1], dtype=torch.long).to(
+#                 self.device
+#             )
+
+#         scene_text = self.tokenizer(scene_caption, return_tensors="pt", padding=True).to(
+#             self.device
+#         )
+#         action_text = self.tokenizer(action_caption, return_tensors="pt", padding=True).to(
+#             self.device
+#         )
+        
+#         scene_token = self.scene_token.repeat(image.shape[0], 1, 1)
+#         scene_token.input_ids[:, 0] = self.tokenizer.enc_token_id
+
+#         output = self.text_encoder(
+#             text.input_ids,
+#             attention_mask=text.attention_mask,
+#             encoder_hidden_states=image_embeds,
+#             encoder_attention_mask=image_atts,
+#             return_dict=True,
+#         )
+        
+        
+        
 @HEAD_REGISTRY.register()
 class DualFSAR(CNN_FSHead):
     """
@@ -3046,16 +3089,19 @@ class DualFSAR(CNN_FSHead):
         super(DualFSAR, self).__init__(cfg)
         args = cfg
         self.args = cfg
+        
         import sys
         sys.path.append("../../LAVIS")
+
+        from lavis.models.blip_models.blip_feature_extractor import BlipFeatureExtractor
+        from lavis.models import load_model_and_preprocess
         
         # backbone, self.preprocess = load(cfg.VIDEO.HEAD.BACKBONE_NAME, device="cuda", cfg=cfg, jit=False)   # ViT-B/16
         # self.backbone = backbone.visual    # model.load_state_dict(state_dict)
         self.class_real_train = cfg.TRAIN.CLASS_NAME
         self.class_real_test = cfg.TEST.CLASS_NAME
         self.mid_dim = 768
-
-        from lavis.models import load_model_and_preprocess
+        
         backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip_feature_extractor", model_type="base", is_eval=False, device='cuda')
         self.backbone = backbone
         # self.backbone.eval()
@@ -3512,9 +3558,9 @@ class DualFSARBLIP2(CNN_FSHead):
         self.before_transformer = nn.Sequential(nn.Linear(in_features=self.mid_dim * 2, out_features=self.mid_dim),
                                                 nn.GELU(),
                                                 nn.LayerNorm(self.mid_dim))
-        self.mid_layer = nn.Sequential(nn.Linear(256, self.mid_dim),
+        self.mid_layer = nn.Sequential(nn.Linear(512, self.mid_dim),
                                        nn.LayerNorm(self.mid_dim))
-        self.classification_layer = nn.Sequential(nn.Linear(in_features=self.mid_dim, out_features=256)) 
+        self.classification_layer = nn.Sequential(nn.Linear(in_features=self.mid_dim, out_features=512)) 
         self.scale = nn.Parameter(torch.FloatTensor(1), requires_grad=True)
         self.scale.data.fill_(1.0)
         
@@ -3526,7 +3572,7 @@ class DualFSARBLIP2(CNN_FSHead):
         
                        
     
-    # @torch.no_grad()
+    @torch.no_grad()
     def get_feats(self, support_images, target_images, support_real_class=False, support_labels=False):
         """
         Takes in images from the support set and query video and returns CNN features.
@@ -3543,22 +3589,31 @@ class DualFSARBLIP2(CNN_FSHead):
             # target_images = einops.rearrange(target_images, "B T C H W -> (B T) C H W")
             
             support_features, support_image_embeds_img = self.backbone.forward_encoder({'image' : support_images, 'text_input' : action_q * (sup_B * sup_T)})
+            support_features = support_features[0]
+            # support_image_embeds_img = support_image_embeds_img[0]
             target_features, target_image_embeds_img = self.backbone.forward_encoder({'image' : target_images, 'text_input' : action_q * (tar_B * tar_T)})
+            target_features = target_features[0]
+            # target_image_embeds_img = target_image_embeds_img[0]
+            # print(target_image_embeds_img)
             
             # scene feature extraction
             scene_q = [self.txt_processors["train"](self.question['scene'])]
             support_scene, support_image_embeds_scene = self.backbone.forward_encoder({'image' : support_images, 'text_input' : scene_q * (sup_B * sup_T)})
+            support_scene =support_scene[0]
+            # support_image_embeds_scene =support_image_embeds_scene[0]
             target_scene, target_image_embeds_scene = self.backbone.forward_encoder({'image' : target_images, 'text_input' : scene_q * (tar_B * tar_T)})
-
+            target_scene =target_scene[0]
+            # target_image_embeds_scene = target_image_embeds_scene[0]
             support_image_embeds = support_image_embeds_img + support_image_embeds_scene
             target_image_embeds = target_image_embeds_img + target_image_embeds_scene
 
             support_action_features = einops.rearrange(support_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
             support_scene_features = einops.rearrange(support_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
+            # print(support_image_embeds.shape)
             support_image_embeds = einops.rearrange(support_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
             # # dim = int(support_features['image_embeds'].shape[-1])
             # text_templete = ["a photo of {}".format(self.class_real_train[int(ii)]) for ii in support_real_class]
             # # text_templete = tokenize(text_templete).cuda()
@@ -3600,13 +3655,13 @@ class DualFSARBLIP2(CNN_FSHead):
 
             support_image_embeds = support_image_embeds_img + support_image_embeds_scene
             target_image_embeds = target_image_embeds_img + target_image_embeds_scene
-            
+
             support_action_features = einops.rearrange(support_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
             support_scene_features = einops.rearrange(support_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_action_features = einops.rearrange(target_features[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
+            target_scene_features = einops.rearrange(target_scene[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
             support_image_embeds = einops.rearrange(support_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
-            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)
+            target_image_embeds = einops.rearrange(target_image_embeds[:, 0, :], '(B T) D -> B T D', B=tar_B, T=tar_T)
             # support_real_class = torch.unique(support_real_class)
             
             # support_features['image_embeds'] = einops.rearrange(support_features['image_embeds'][:, 0, :], '(B T) D -> B T D', B=sup_B, T=sup_T)

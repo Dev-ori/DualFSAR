@@ -10,14 +10,14 @@ TRAIN:
   NUM_SAMPLES: 1000000
   WAY: 5
   SHOT: 1
-  QUERY_PER_CLASS: 5
+  QUERY_PER_CLASS: 3
   QUERY_PER_CLASS_TEST: 1
   NUM_TRAIN_TASKS: 5000
   NUM_TEST_TASKS: 10000
   VAL_FRE_ITER: 300
   BATCH_SIZE: 4  # Same with NUM_GPUS
   CLASS_NAME: ['brush hair', 'catch', 'chew', 'clap', 'climb', 'climb stairs', 'dive', 'draw_sword', 'dribble', 'drink', 'fall floor', 'flic flac', 'handstand', 'hug', 'jump', 'kiss', 'pullup', 'punch', 'push', 'ride_bike', 'ride horse', 'shake_hands', 'shoot_bow', 'situp', 'stand', 'sword', 'sword exercise', 'throw', 'turn', 'walk', 'wave']
-  BATCH_SIZE_PER_TASK: 4
+  BATCH_SIZE_PER_TASK: 2
   CHECKPOINT_FILE_PATH: ""
   EVAL_PERIOD: 2
   NUM_FOLDS: 1
@@ -44,12 +44,12 @@ DATA:
   SAMPLING_RATE: 50
   # SAMPLING_RATE_TRAIN: 3
   SAMPLING_UNIFORM: false
-  TRAIN_JITTER_SCALES: [256, 256]
+  TRAIN_JITTER_SCALES: [500, 500]
   MEAN: [0.48145466, 0.4578275, 0.40821073]
   STD: [0.26862954, 0.26130258, 0.27577711]
-  TRAIN_CROP_SIZE: 224 # 84  # 224
-  TEST_CROP_SIZE: 224
-  TEST_SCALE: 256
+  TRAIN_CROP_SIZE: 480 # 84  # 224
+  TEST_CROP_SIZE: 480
+  TEST_SCALE: 500
   TEST_CENTER_CROP: true
   CLIP_INTERVAL: 8
   FPS: 12
