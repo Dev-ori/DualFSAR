@@ -526,7 +526,7 @@ def train_few_shot(cfg):
 
     cur_epoch = 0
     shuffle_dataset(train_loader, cur_epoch)
-    
+    model
     train_epoch(
         train_loader, model, model_ema, optimizer, train_meter, cur_epoch, mixup_fn, cfg, writer, val_meter, val_loader
     )
