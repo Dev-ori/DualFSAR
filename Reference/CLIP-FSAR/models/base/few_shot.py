@@ -3979,7 +3979,7 @@ class DualFSAR3(CNN_FSHead):
         self.class_real_test = cfg.TEST.CLASS_NAME
         self.mid_dim = 768
         
-        backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip2_feature_extractor", model_type="pretrain", is_eval=True, device='cuda')
+        backbone, vis_processors, txt_processors = load_model_and_preprocess(name="blip2_feature_extractor", model_type="pretrain", is_eval=False, device='cuda')
         self.backbone = backbone
         # self.backbone.eval()
         self.txt_processors = txt_processors
