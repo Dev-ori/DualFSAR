@@ -4298,14 +4298,14 @@ class DualFSAR3(CNN_FSHead):
                 # support_features, target_features, _, support_scene, target_scene = self.get_feats(support_images, target_images, support_labels)
                 # support_bs = support_features.shape[0]
                 # target_bs = target_features.shape[0]
-                feature_classification_in = torch.cat([support_action.image_embeds, target_action.image_embeds], dim=0)
-                feature_classification = self.classification_layer(feature_classification_in).mean(1)
-                class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
+                # feature_classification_in = torch.cat([support_action.image_embeds, target_action.image_embeds], dim=0)
+                # feature_classification = self.classification_layer(feature_classification_in).mean(1)
+                # class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
                 
                 feature_classification_in_multi = torch.cat([support_features, target_features], dim=0)
                 feature_classification_multi = self.classification_layer(feature_classification_in_multi).mean(1)
                 class_text_logits_multi = cos_sim(feature_classification_multi, self.text_features_train)*self.scale2
-                class_text_logits = class_text_logits + class_text_logits_multi
+                class_text_logits = class_text_logits_multi
                 # feature_classification_in = torch.cat([support_features,target_features], dim=0)
                 # feature_classification = self.classification_layer(feature_classification_in).mean(1)
                 # class_text_logits = cos_sim(feature_classification, self.text_features_train)*self.scale
