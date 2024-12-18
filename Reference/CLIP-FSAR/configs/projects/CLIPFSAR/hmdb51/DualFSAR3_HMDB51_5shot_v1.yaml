@@ -77,14 +77,14 @@ SOLVER:
 
 VIDEO:
   HEAD:
-    NAME: DualFSAR  
+    NAME: DualFSAR3  
     BACKBONE_NAME: "RN50"
     
   BACKBONE:
     META_ARCH: Identity
 
 NUM_GPUS: 4
-OUTPUT_DIR: output/DualFSAR_HMDB51_5shot
+OUTPUT_DIR: output/DualFSAR3_HMDB51_5shot
 
 
 

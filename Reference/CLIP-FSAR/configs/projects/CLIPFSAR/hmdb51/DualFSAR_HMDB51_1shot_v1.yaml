@@ -82,7 +82,7 @@ VIDEO:
     META_ARCH: Identity
 
 NUM_GPUS: 4
-OUTPUT_DIR: output/CLIPFSAR_HMDB51_1shot
+OUTPUT_DIR: output/DualFSAR_HMDB51_1shot
 
 
 
